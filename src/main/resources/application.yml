@@ -1,0 +1,24 @@
+spring:
+  application:
+    name: company-radar
+  data:
+    mongodb:
+      uri: ${MONGO_URI:mongodb://localhost:27017/radar}
+  elasticsearch:
+    uris: ${ELASTICSEARCH_URI:http://localhost:9200}
+  threads:
+    virtual:
+      enabled: true   # Tomcat request threads are virtual too
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+radar:
+  crawl:
+    user-agent: "CompanyRadarBot/1.0 (+https://github.com/Jagadeesh-Udatha/company-radar)"
+    min-delay: 1s
+    timeout: 10s
+    max-body-bytes: 2000000
