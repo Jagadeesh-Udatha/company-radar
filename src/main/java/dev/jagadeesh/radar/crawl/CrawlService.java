@@ -15,7 +15,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 
-/** Runs crawl jobs on virtual threads: crawl, extract a profile, save it to MongoDB, index it in Elasticsearch. */
+/** Runs crawl jobs on virtual threads: crawl, extract a profile, save it to MongoDB (where the text index makes it searchable). */
 @Service
 public class CrawlService {
 
