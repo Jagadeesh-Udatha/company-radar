@@ -1,6 +1,6 @@
 # Interview notes: Company Radar
 
-For data-platform roles (crawling, Elasticsearch, MongoDB), like Tracxn's backend role.
+For data-platform roles (crawling, search, MongoDB), like Tracxn's backend role.
 
 ## Crawling
 
@@ -19,21 +19,15 @@ At web scale the `seen` set becomes a Bloom filter or a key-value store; content
 
 **"How would you scale it to millions of sites?"** Partition the frontier by host (Kafka topic keyed by host, so one consumer owns a host's politeness), store seen-URLs in Redis/RocksDB, schedule recrawls by change frequency (compare content hashes from the `pages` collection), and run fetchers as stateless workers.
 
-## Elasticsearch
+## Search (MongoDB text index)
 
-**"Text vs keyword?"** `text` is analysed (tokenised, lower-cased, stemmed with the `english` analyzer) for full-text search. `keyword` is the exact value, used for filters, sorting and aggregations. `name` is both (multi-field `name.keyword`).
+**"How does the search work?"** One text index on `companies` with weights `name: 3`, `tags: 2`, `description: 1` and the `english` language (lower-casing, stemming, stop words). `$text` finds matching documents and `{$meta: "textScore"}` ranks them, so a match in the name outranks one in the description. See `CompanySearch.createIndexes`.
 
-**"Why an explicit mapping?"** Dynamic mapping guesses: `sector` would become `text` + `keyword`, and booleans/dates can be mis-typed from the first document. `CompanySearch.createIndexIfMissing` creates the index from the annotated `CompanyDocument`.
+**"Why not Elasticsearch?"** For one collection of company profiles, MongoDB's text index covers keyword search, weighting and filters with no second datastore to keep in sync. Elasticsearch would be the next step for typo tolerance (fuzzy matching), synonyms or very large indexes.
 
-**"Must vs filter?"** `must` clauses score (relevance); `filter` clauses only include or exclude, aren't scored, and are cached. Sector and hiring are filters. See `SearchQueries.build` and `SearchQueryTest`.
+**"How are filters and facets done?"** Sector and hiring are plain equality clauses next to `$text` (with their own compound index); they narrow results without changing the score. Facets are an aggregation: `$match` (same filter) → `$group` by `sector` with a count. See `SearchQueries.build` and `SearchQueryTest`.
 
-**"How do you rank?"** `multi_match` across `name^3`, `tags^2`, `description` (BM25), so a match in the name outranks a match in the description. `fuzziness: AUTO` tolerates typos (`paymnts` → `payments`).
-
-**"What's an aggregation?"** A terms aggregation on `sector` returns counts per sector for the current query: the facet counts in the UI.
-
-**"How do MongoDB and Elasticsearch stay in sync?"** MongoDB is the source of truth; the profile is indexed right after it's saved. If indexing fails the next crawl re-indexes it. For stronger guarantees: an outbox or MongoDB Change Streams → indexer, and a periodic full re-index into a new index swapped in with an alias (zero-downtime reindex).
-
-**"Shards and replicas?"** Shards split an index for parallelism and size; replicas give redundancy and read throughput. Here 1 shard / 0 replicas for a single dev node. Shard count is fixed at creation, so changing it means reindexing.
+**"Limits of a text index?"** Only one per collection, no fuzzy matching (`paymnts` won't match), whole-word stemming only, and `$text` must be the first stage of an aggregation.
 
 ## MongoDB
 
@@ -45,4 +39,4 @@ At web scale the `seen` set becomes a Bloom filter or a key-value store; content
 
 - Pure units for the tricky parts (normaliser, robots, rate limiter with a fake clock).
 - Crawler against an in-memory `PageFetcher`, so tests are fast and deterministic and never hit the internet.
-- One end-to-end test on real MongoDB and Elasticsearch through Testcontainers.
+- One end-to-end test on a real MongoDB through Testcontainers.

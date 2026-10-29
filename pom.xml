@@ -15,7 +15,7 @@
     <artifactId>company-radar</artifactId>
     <version>1.0.0</version>
     <name>company-radar</name>
-    <description>Polite company-website crawler that builds company profiles in MongoDB and serves fuzzy, faceted search from Elasticsearch</description>
+    <description>Polite company-website crawler that builds company profiles in MongoDB and serves faceted full-text search from a MongoDB text index</description>
 
     <properties>
         <java.version>21</java.version>
@@ -36,10 +36,6 @@
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-data-elasticsearch</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
         <dependency>
@@ -56,11 +52,6 @@
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>junit-jupiter</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.testcontainers</groupId>
-            <artifactId>elasticsearch</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>

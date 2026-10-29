@@ -6,7 +6,7 @@ import org.springframework.data.mongodb.core.mapping.Document;
 import java.time.Instant;
 import java.util.List;
 
-/** Source of truth in MongoDB; a copy is indexed into Elasticsearch for search. */
+/** One company profile in MongoDB; also searched through the collection's text index (see CompanySearch). */
 @Document("companies")
 public record CompanyProfile(@Id String site, String name, String description, String sector, List<String> tags,
                              String careersUrl, String linkedinUrl, boolean hiring, int pagesCrawled,

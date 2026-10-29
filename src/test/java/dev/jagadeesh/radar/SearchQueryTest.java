@@ -1,28 +1,37 @@
 package dev.jagadeesh.radar;
 
 import dev.jagadeesh.radar.search.SearchQueries;
+import org.bson.BsonDocument;
+import org.bson.conversions.Bson;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Checks the Elasticsearch query DSL we generate, without a cluster. */
+/** Checks the MongoDB filters we generate, without a database. */
 class SearchQueryTest {
 
     @Test
-    void textSearchIsFuzzyAndBoostsNameAndTags() {
-        String json = SearchQueries.build("paymnts", null, false).toString();
+    void textSearchUsesTheTextIndexAndNoFilters() {
+        String json = json(SearchQueries.build("payments", null, false));
 
-        assertThat(json).contains("\"multi_match\"")
-                .contains("\"name^3\"").contains("\"tags^2\"").contains("\"description\"")
-                .contains("\"fuzziness\":\"AUTO\"")
-                .doesNotContain("\"filter\"");
+        assertThat(json).contains("\"$text\"").contains("\"$search\": \"payments\"")
+                .doesNotContain("sector").doesNotContain("hiring");
     }
 
     @Test
-    void sectorAndHiringAreFiltersNotScoringClauses() {
-        String json = SearchQueries.build(null, "fintech", true).toString();
+    void sectorAndHiringAreExactFilters() {
+        String json = json(SearchQueries.build(null, "fintech", true));
 
-        assertThat(json).contains("\"match_all\"")
-                .contains("\"filter\":[{\"term\":{\"sector\":{\"value\":\"fintech\"}}},{\"term\":{\"hiring\":{\"value\":true}}}]");
+        assertThat(json).doesNotContain("$text")
+                .contains("\"sector\": \"fintech\"").contains("\"hiring\": true");
+    }
+
+    @Test
+    void noCriteriaMatchesEverything() {
+        assertThat(json(SearchQueries.build(" ", null, false))).isEqualTo("{}");
+    }
+
+    private static String json(Bson filter) {
+        return filter.toBsonDocument(BsonDocument.class, com.mongodb.MongoClientSettings.getDefaultCodecRegistry()).toJson();
     }
 }

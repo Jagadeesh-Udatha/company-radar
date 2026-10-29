@@ -1,8 +1,8 @@
 # Company Radar
 
-A polite **web crawler** that reads a company's website, builds a **company profile** (name, description, sector, careers page, LinkedIn), stores it in **MongoDB**, and serves **fuzzy, faceted search** from **Elasticsearch**.
+A polite **web crawler** that reads a company's website, builds a **company profile** (name, description, sector, careers page, LinkedIn), stores it in **MongoDB**, and serves **faceted full-text search** from a weighted MongoDB **text index**.
 
-Java 21 (virtual threads) · Spring Boot 3.4 · Jsoup · Spring Data MongoDB · Spring Data Elasticsearch · JUnit 5 · Testcontainers · Docker · GitHub Actions
+Java 21 (virtual threads) · Spring Boot 3.4 · Jsoup · Spring Data MongoDB · JUnit 5 · Testcontainers · Docker
 
 ## Flow
 
@@ -15,11 +15,10 @@ robots.txt ─▶ BFS crawl (same site, depth/page limits, per-host rate limit, 
         ▼
 ProfileExtractor ─▶ name · description · sector tags · careers URL · LinkedIn · hiring?
         │
-        ├──▶ MongoDB   companies (source of truth) + pages (crawl log with content hashes)
-        └──▶ Elasticsearch index "companies" (explicit mapping)
+        └──▶ MongoDB   companies (text index: name x3, tags x2, description) + pages (crawl log with content hashes)
                      ▲
-GET /api/companies/search?q=paymnts&sector=fintech&hiring=true
-     multi_match name^3 / tags^2 / description, fuzziness AUTO · term filters · sector facets · highlights
+GET /api/companies/search?q=payments&sector=fintech&hiring=true
+     $text search sorted by textScore · exact sector/hiring filters · sector facets ($group) · highlighted snippet
 ```
 
 ## Crawler rules
@@ -60,7 +59,7 @@ mvn verify
 - `CrawlBuildingBlocksTest`: URL normalisation, robots.txt groups/patterns/crawl-delay, rate limiter with a fake clock.
 - `CrawlerTest`: an in-memory site with traps (robots-blocked path, mirror page, tracking params, fragments, off-site links, PDFs, depth limit, robots.txt 5xx/404).
 - `ProfileExtractorTest`: name/description fallbacks, sector tagging, careers + LinkedIn detection.
-- `SearchQueryTest`: the generated Elasticsearch DSL (boosts, fuzziness, filters vs scoring).
-- `RadarFlowIntegrationTest`: real MongoDB + Elasticsearch (Testcontainers, or `MONGO_TEST_URI` + `ES_TEST_URI`): crawl job → profile → indexed → fuzzy search with highlight and facets; filters and boosting.
+- `SearchQueryTest` / `HighlightTest`: the generated MongoDB filters and the snippet highlighter, no database needed.
+- `RadarFlowIntegrationTest`: real MongoDB (Testcontainers, or `MONGO_TEST_URI`): crawl job → profile → text search with highlight and facets; filters and name weighting.
 
 See [INTERVIEW_NOTES.md](INTERVIEW_NOTES.md).

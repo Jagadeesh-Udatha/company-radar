@@ -1,6 +1,11 @@
 package dev.jagadeesh.radar.search;
 
-import co.elastic.clients.elasticsearch._types.query_dsl.Query;
+import com.mongodb.client.model.Filters;
+import org.bson.Document;
+import org.bson.conversions.Bson;
+
+import java.util.ArrayList;
+import java.util.List;
 
 public final class SearchQueries {
 
@@ -8,23 +13,21 @@ public final class SearchQueries {
     }
 
     /**
-     * Full text on name (boosted x3), tags (x2) and description, typo tolerant (fuzziness AUTO). Sector and hiring are
-     * filters: exact, cached by Elasticsearch, and they don't affect the relevance score.
+     * MongoDB filter for a search: {@code $text} over the weighted text index (name x3, tags x2, description) when
+     * there is a query, plus exact matches on sector and hiring. The filters use their own indexes and don't change
+     * the text score.
      */
-    public static Query build(String text, String sector, boolean hiringOnly) {
-        return Query.of(q -> q.bool(b -> {
-            if (text == null || text.isBlank()) {
-                b.must(m -> m.matchAll(all -> all));
-            } else {
-                b.must(m -> m.multiMatch(mm -> mm.query(text).fields("name^3", "tags^2", "description").fuzziness("AUTO")));
-            }
-            if (sector != null && !sector.isBlank()) {
-                b.filter(f -> f.term(t -> t.field("sector").value(sector)));
-            }
-            if (hiringOnly) {
-                b.filter(f -> f.term(t -> t.field("hiring").value(true)));
-            }
-            return b;
-        }));
+    public static Bson build(String text, String sector, boolean hiringOnly) {
+        List<Bson> clauses = new ArrayList<>();
+        if (text != null && !text.isBlank()) {
+            clauses.add(Filters.text(text));
+        }
+        if (sector != null && !sector.isBlank()) {
+            clauses.add(Filters.eq("sector", sector));
+        }
+        if (hiringOnly) {
+            clauses.add(Filters.eq("hiring", true));
+        }
+        return clauses.isEmpty() ? new Document() : Filters.and(clauses);
     }
 }

@@ -1,89 +1,110 @@
 package dev.jagadeesh.radar.search;
 
-import co.elastic.clients.elasticsearch._types.aggregations.Aggregation;
-import co.elastic.clients.elasticsearch._types.aggregations.StringTermsBucket;
-import dev.jagadeesh.radar.profile.CompanyProfile;
+import com.mongodb.client.FindIterable;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.model.Accumulators;
+import com.mongodb.client.model.Aggregates;
+import com.mongodb.client.model.Projections;
+import com.mongodb.client.model.Sorts;
+import org.bson.Document;
+import org.bson.conversions.Bson;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.elasticsearch.client.elc.ElasticsearchAggregations;
-import org.springframework.data.elasticsearch.client.elc.NativeQuery;
-import org.springframework.data.elasticsearch.core.ElasticsearchOperations;
-import org.springframework.data.elasticsearch.core.IndexOperations;
-import org.springframework.data.elasticsearch.core.SearchHit;
-import org.springframework.data.elasticsearch.core.SearchHits;
-import org.springframework.data.elasticsearch.core.query.HighlightQuery;
-import org.springframework.data.elasticsearch.core.query.highlight.Highlight;
-import org.springframework.data.elasticsearch.core.query.highlight.HighlightField;
-import org.springframework.data.elasticsearch.core.query.highlight.HighlightParameters;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.index.Index;
+import org.springframework.data.mongodb.core.index.IndexOperations;
+import org.springframework.data.mongodb.core.index.TextIndexDefinition;
 import org.springframework.stereotype.Component;
 
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
+/** Full-text search over the company profiles in MongoDB (text index), with sector facets and highlighted snippets. */
 @Component
 public class CompanySearch {
 
+    static final String COLLECTION = "companies";
+
     public record Hit(String site, String name, String sector, List<String> tags, boolean hiring, String careersUrl,
-                      String snippet, float score) {
+                      String snippet, double score) {
     }
 
     public record Result(long total, List<Hit> hits, Map<String, Long> sectors) {
     }
 
-    private final ElasticsearchOperations es;
+    private final MongoTemplate mongo;
 
-    public CompanySearch(ElasticsearchOperations es) {
-        this.es = es;
+    public CompanySearch(MongoTemplate mongo) {
+        this.mongo = mongo;
     }
 
-    /** Creates the index with the explicit mapping above, instead of letting dynamic mapping guess types. */
+    /** One weighted text index (a collection can have only one) plus indexes for the two filters. */
     @EventListener(ApplicationReadyEvent.class)
-    public void createIndexIfMissing() {
-        IndexOperations index = es.indexOps(CompanyDocument.class);
-        if (!index.exists()) {
-            index.createWithMapping();
-        }
-    }
-
-    public void index(CompanyProfile profile) {
-        es.save(CompanyDocument.from(profile));
-    }
-
-    public void refresh() {
-        es.indexOps(CompanyDocument.class).refresh();
+    public void createIndexes() {
+        IndexOperations ops = mongo.indexOps(COLLECTION);
+        ops.ensureIndex(TextIndexDefinition.builder()
+                .named("company_text")
+                .onField("name", 3F)
+                .onField("tags", 2F)
+                .onField("description")
+                .withDefaultLanguage("english")
+                .build());
+        ops.ensureIndex(new Index().on("sector", Sort.Direction.ASC).on("hiring", Sort.Direction.ASC));
     }
 
     public Result search(String text, String sector, boolean hiringOnly, int page, int size) {
-        NativeQuery query = NativeQuery.builder()
-                .withQuery(SearchQueries.build(text, sector, hiringOnly))
-                .withAggregation("sectors", Aggregation.of(a -> a.terms(t -> t.field("sector").size(20))))
-                .withHighlightQuery(new HighlightQuery(new Highlight(
-                        HighlightParameters.builder().withPreTags("<em>").withPostTags("</em>").build(),
-                        List.of(new HighlightField("description"))), CompanyDocument.class))
-                .withPageable(PageRequest.of(page, size))
-                .build();
+        boolean hasText = text != null && !text.isBlank();
+        Bson filter = SearchQueries.build(text, sector, hiringOnly);
+        MongoCollection<Document> companies = mongo.getCollection(COLLECTION);
 
-        SearchHits<CompanyDocument> hits = es.search(query, CompanyDocument.class);
-        List<Hit> items = hits.getSearchHits().stream().map(CompanySearch::toHit).toList();
-        return new Result(hits.getTotalHits(), items, sectorFacets(hits));
+        FindIterable<Document> found = companies.find(filter).skip(page * size).limit(size);
+        found = hasText
+                ? found.projection(Projections.metaTextScore("score")).sort(Sorts.metaTextScore("score"))
+                : found.sort(Sorts.ascending("name"));
+
+        List<Hit> hits = found.map(d -> toHit(d, text)).into(new java.util.ArrayList<>());
+        return new Result(companies.countDocuments(filter), hits, sectorFacets(companies, filter));
     }
 
-    private static Hit toHit(SearchHit<CompanyDocument> h) {
-        CompanyDocument d = h.getContent();
-        List<String> highlights = h.getHighlightField("description");
-        String snippet = highlights.isEmpty() ? d.description() : String.join(" … ", highlights);
-        return new Hit(d.site(), d.name(), d.sector(), d.tags(), d.hiring(), d.careersUrl(), snippet, h.getScore());
+    private static Hit toHit(Document d, String text) {
+        Number score = d.get("score", Number.class);
+        return new Hit(d.getString("_id"), d.getString("name"), d.getString("sector"), d.getList("tags", String.class),
+                Boolean.TRUE.equals(d.getBoolean("hiring")), d.getString("careersUrl"),
+                highlight(d.getString("description"), text), score == null ? 0 : score.doubleValue());
     }
 
-    private static Map<String, Long> sectorFacets(SearchHits<CompanyDocument> hits) {
-        Map<String, Long> facets = new LinkedHashMap<>();
-        if (hits.getAggregations() instanceof ElasticsearchAggregations aggs && aggs.get("sectors") != null) {
-            for (StringTermsBucket b : aggs.get("sectors").aggregation().getAggregate().sterms().buckets().array()) {
-                facets.put(b.key().stringValue(), b.docCount());
-            }
+    /** Wraps words that start with a query term in {@code <em>}; "payments" also marks "payment" (crude stemming). */
+    static String highlight(String description, String text) {
+        if (description == null || text == null || text.isBlank()) {
+            return description;
         }
+        String[] stems = Arrays.stream(text.toLowerCase().split("\\W+"))
+                .filter(w -> w.length() >= 3)
+                .map(w -> w.endsWith("s") ? w.substring(0, w.length() - 1) : w)
+                .map(Pattern::quote)
+                .toArray(String[]::new);
+        if (stems.length == 0) {
+            return description;
+        }
+        return description.replaceAll("(?i)\\b((?:" + String.join("|", stems) + ")\\w*)", "<em>$1</em>");
+    }
+
+    private static Map<String, Long> sectorFacets(MongoCollection<Document> companies, Bson filter) {
+        Map<String, Long> facets = new LinkedHashMap<>();
+        companies.aggregate(List.of(
+                Aggregates.match(filter),
+                Aggregates.group("$sector", Accumulators.sum("count", 1L)),
+                Aggregates.sort(Sorts.descending("count")),
+                Aggregates.limit(20)
+        )).forEach(d -> {
+            if (d.get("_id") != null) {
+                facets.put(d.getString("_id"), d.get("count", Number.class).longValue());
+            }
+        });
         return facets;
     }
 }

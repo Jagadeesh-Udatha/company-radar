@@ -13,5 +13,5 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: maven
-      # Docker is available on GitHub runners, so the MongoDB + Elasticsearch Testcontainers tests run here too.
+      # Docker is available on GitHub runners, so the MongoDB Testcontainers tests run here too.
       - run: mvn -B verify

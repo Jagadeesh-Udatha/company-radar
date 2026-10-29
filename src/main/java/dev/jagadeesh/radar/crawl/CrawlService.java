@@ -3,7 +3,6 @@ package dev.jagadeesh.radar.crawl;
 import dev.jagadeesh.radar.profile.CompanyProfile;
 import dev.jagadeesh.radar.profile.CompanyStore;
 import dev.jagadeesh.radar.profile.ProfileExtractor;
-import dev.jagadeesh.radar.search.CompanySearch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -36,17 +35,15 @@ public class CrawlService {
     private final Crawler crawler;
     private final ProfileExtractor extractor;
     private final CompanyStore store;
-    private final CompanySearch search;
     private final ExecutorService executor;
     private final Clock clock;
     private final Map<String, Job> jobs = new ConcurrentHashMap<>();
 
-    public CrawlService(Crawler crawler, ProfileExtractor extractor, CompanyStore store, CompanySearch search,
+    public CrawlService(Crawler crawler, ProfileExtractor extractor, CompanyStore store,
                         ExecutorService crawlExecutor, Clock clock) {
         this.crawler = crawler;
         this.extractor = extractor;
         this.store = store;
-        this.search = search;
         this.executor = crawlExecutor;
         this.clock = clock;
     }
@@ -72,7 +69,6 @@ public class CrawlService {
             Instant now = clock.instant();
             CompanyProfile profile = extractor.extract(result.site(), result.pages(), now);
             store.save(profile, result.pages(), now);
-            search.index(profile);
             jobs.put(job.id(), new Job(job.id(), job.seedUrl(), Status.DONE, result.pages().size(),
                     result.blockedByRobots(), result.duplicateBodies(), result.errors(), profile, null,
                     job.startedAt(), now));
